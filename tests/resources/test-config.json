@@ -1,0 +1,176 @@
+{
+  "projectName": "pipeline-framework-test",
+  "buildTool": "maven",
+  "sonarProjectKey": "com.example:pipeline-framework-test",
+  "environments": [
+    {
+      "name": "dev",
+      "displayName": "Development",
+      "autoPromote": true,
+      "replicas": 1,
+      "requiresApproval": false,
+      "deploymentStrategy": "rolling-update",
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "256Mi"
+        },
+        "limits": {
+          "cpu": "500m",
+          "memory": "512Mi"
+        }
+      }
+    },
+    {
+      "name": "sit",
+      "displayName": "System Integration Testing",
+      "autoPromote": true,
+      "replicas": 1,
+      "requiresApproval": false,
+      "deploymentStrategy": "rolling-update",
+      "resources": {
+        "requests": {
+          "cpu": "200m",
+          "memory": "512Mi"
+        },
+        "limits": {
+          "cpu": "1000m",
+          "memory": "1Gi"
+        }
+      }
+    },
+    {
+      "name": "uat",
+      "displayName": "User Acceptance Testing",
+      "autoPromote": false,
+      "replicas": 2,
+      "requiresApproval": true,
+      "deploymentStrategy": "rolling-update",
+      "resources": {
+        "requests": {
+          "cpu": "500m",
+          "memory": "1Gi"
+        },
+        "limits": {
+          "cpu": "2000m",
+          "memory": "2Gi"
+        }
+      }
+    },
+    {
+      "name": "prod",
+      "displayName": "Production",
+      "autoPromote": false,
+      "replicas": 3,
+      "requiresApproval": true,
+      "deploymentStrategy": "blue-green",
+      "resources": {
+        "requests": {
+          "cpu": "1000m",
+          "memory": "2Gi"
+        },
+        "limits": {
+          "cpu": "4000m",
+          "memory": "4Gi"
+        }
+      }
+    }
+  ],
+  "nexus": {
+    "url": "https://nexus-test.example.com",
+    "user": "test-user",
+    "password": "${NEXUS_TEST_PASSWORD}",
+    "devUrl": "https://nexus-dev-test.example.com",
+    "sitUrl": "https://nexus-sit-test.example.com",
+    "uatUrl": "https://nexus-uat-test.example.com",
+    "prodUrl": "https://nexus-prod-test.example.com",
+    "repositories": {
+      "maven": "maven-releases",
+      "docker": "docker-releases",
+      "npm": "npm-releases",
+      "nuget": "nuget-releases",
+      "generic": "generic-releases"
+    }
+  },
+  "sonarqube": {
+    "url": "https://sonar-test.example.com",
+    "token": "${SONAR_TEST_TOKEN}",
+    "qualityGateId": "Test-Quality-Gate",
+    "projectKey": "com.example:pipeline-framework-test",
+    "organization": "test-org"
+  },
+  "kubernetes": {
+    "cluster": "test-cluster",
+    "devContext": "dev-cluster-context",
+    "sitContext": "sit-cluster-context",
+    "uatContext": "uat-cluster-context",
+    "prodContext": "prod-cluster-context"
+  },
+  "helm": {
+    "chartPath": "charts/test-app",
+    "releaseName": "pipeline-framework-test",
+    "namespace": "test-apps",
+    "timeout": "10m",
+    "valuesFiles": {
+      "common": "charts/test-app/values.yaml",
+      "dev": "charts/test-app/values-dev.yaml",
+      "sit": "charts/test-app/values-sit.yaml",
+      "uat": "charts/test-app/values-uat.yaml",
+      "prod": "charts/test-app/values-prod.yaml"
+    }
+  },
+  "serviceNow": {
+    "url": "https://test-company.service-now.com",
+    "username": "jenkins-test-integration",
+    "password": "${SERVICENOW_TEST_PASSWORD}",
+    "assignmentGroup": "Test DevOps Team",
+    "fieldMappings": {
+      "application": "u_application",
+      "environment": "u_environment",
+      "buildNumber": "u_build_number",
+      "gitCommit": "u_git_commit",
+      "requestor": "u_requestor"
+    }
+  },
+  "monitoring": {
+    "grafanaUrl": "https://grafana-test.example.com",
+    "prometheusUrl": "https://prometheus-test.example.com",
+    "alertManagerUrl": "https://alertmanager-test.example.com"
+  },
+  "security": {
+    "owaspCheckVersion": "8.4.0",
+    "trivyVersion": "0.45.0",
+    "secretScanEnabled": true,
+    "containerScanEnabled": true,
+    "dependencyScanEnabled": true,
+    "reportPath": "security-reports",
+    "failOnCritical": false,
+    "failOnHigh": false
+  },
+  "qualityGateEnabled": true,
+  "debug": false,
+  "parallelExecution": true,
+  "maxRetries": 3,
+  "retryDelaySeconds": 30,
+  "notifications": {
+    "slack": {
+      "enabled": false,
+      "webhook": "${SLACK_TEST_WEBHOOK}",
+      "channel": "#test-deployments"
+    },
+    "email": {
+      "enabled": false,
+      "recipients": ["devops-test@example.com"]
+    }
+  },
+  "features": {
+    "artifactManagement": true,
+    "securityScanning": true,
+    "qualityGates": true,
+    "multiEnvironment": true,
+    "serviceNowIntegration": true,
+    "helmDeployment": true,
+    "parallelStages": true,
+    "performanceMonitoring": true
+  }
+} 

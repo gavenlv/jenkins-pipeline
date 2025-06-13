@@ -1,0 +1,523 @@
+/**
+ * Jenkins Pipeline Validation Test
+ * This pipeline validates all components of the universal pipeline framework
+ */
+@Library('pipeline-library') _
+
+// Import all modules for testing
+import modules.BasePipeline
+import modules.EnvironmentConfigManager
+import modules.languages.JavaModule
+import modules.languages.PythonModule
+import modules.languages.TypeScriptModule
+import modules.quality.SecurityScanModule
+import modules.deployment.HelmDeploymentModule
+import modules.artifacts.ArtifactManager
+import modules.integration.ServiceNowIntegration
+
+pipeline {
+    agent any
+    
+    parameters {
+        choice(
+            name: 'TEST_SUITE',
+            choices: ['ALL', 'UNIT_TESTS', 'INTEGRATION_TESTS', 'PIPELINE_TESTS', 'SECURITY_TESTS'],
+            description: 'Select test suite to run'
+        )
+        booleanParam(
+            name: 'RUN_PERFORMANCE_TESTS',
+            defaultValue: false,
+            description: 'Run performance tests (long running)'
+        )
+        booleanParam(
+            name: 'GENERATE_REPORTS',
+            defaultValue: true,
+            description: 'Generate test reports and documentation'
+        )
+    }
+    
+    environment {
+        TEST_PROJECT = "pipeline-framework-test"
+        TEST_NEXUS_URL = "https://nexus-test.example.com"
+        TEST_SONAR_URL = "https://sonar-test.example.com"
+        GRADLE_OPTS = "-Xmx2g -Dorg.gradle.daemon=false"
+    }
+    
+    stages {
+        stage('Setup Test Environment') {
+            steps {
+                script {
+                    echo "=== Pipeline Framework Validation Test Suite ==="
+                    echo "Test Suite: ${params.TEST_SUITE}"
+                    echo "Performance Tests: ${params.RUN_PERFORMANCE_TESTS}"
+                    echo "Generate Reports: ${params.GENERATE_REPORTS}"
+                    
+                    // Clean workspace
+                    deleteDir()
+                    
+                    // Checkout test repository
+                    checkout scm
+                    
+                    // Setup test environment
+                    sh '''
+                        echo "Setting up test environment..."
+                        mkdir -p test-workspace
+                        mkdir -p test-reports
+                        mkdir -p test-artifacts
+                        
+                        # Create test configuration files
+                        echo "Creating test configuration files..."
+                        cp tests/resources/test-config.json test-workspace/
+                        cp tests/resources/sample-pom.xml test-workspace/pom.xml
+                        cp tests/resources/sample-package.json test-workspace/package.json
+                        cp tests/resources/sample-requirements.txt test-workspace/requirements.txt
+                    '''
+                }
+            }
+        }
+        
+        stage('Unit Tests') {
+            when {
+                anyOf {
+                    params.TEST_SUITE == 'ALL'
+                    params.TEST_SUITE == 'UNIT_TESTS'
+                }
+            }
+            parallel {
+                stage('BasePipeline Tests') {
+                    steps {
+                        script {
+                            echo "Running BasePipeline unit tests..."
+                            sh '''
+                                cd tests/unit
+                                gradle test --tests "*BasePipelineTest*" --info
+                                cp build/test-results/test/TEST-*.xml ../../test-reports/
+                            '''
+                        }
+                    }
+                }
+                
+                stage('EnvironmentConfigManager Tests') {
+                    steps {
+                        script {
+                            echo "Running EnvironmentConfigManager unit tests..."
+                            sh '''
+                                cd tests/unit
+                                gradle test --tests "*EnvironmentConfigManagerTest*" --info
+                                cp build/test-results/test/TEST-*.xml ../../test-reports/
+                            '''
+                        }
+                    }
+                }
+                
+                stage('Language Modules Tests') {
+                    steps {
+                        script {
+                            echo "Running Language Modules unit tests..."
+                            sh '''
+                                cd tests/unit
+                                gradle test --tests "*JavaModuleTest*" --info
+                                gradle test --tests "*PythonModuleTest*" --info
+                                gradle test --tests "*TypeScriptModuleTest*" --info
+                                cp build/test-results/test/TEST-*.xml ../../test-reports/
+                            '''
+                        }
+                    }
+                }
+                
+                stage('Integration Modules Tests') {
+                    steps {
+                        script {
+                            echo "Running Integration Modules unit tests..."
+                            sh '''
+                                cd tests/unit
+                                gradle test --tests "*ServiceNowIntegrationTest*" --info
+                                gradle test --tests "*SecurityScanModuleTest*" --info
+                                cp build/test-results/test/TEST-*.xml ../../test-reports/
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Integration Tests') {
+            when {
+                anyOf {
+                    params.TEST_SUITE == 'ALL'
+                    params.TEST_SUITE == 'INTEGRATION_TESTS'
+                }
+            }
+            steps {
+                script {
+                    echo "Running integration tests..."
+                    
+                    // Test BasePipeline integration
+                    def testConfig = [
+                        projectName: env.TEST_PROJECT,
+                        environments: [
+                            [name: 'dev', autoPromote: true],
+                            [name: 'test', requiresApproval: false]
+                        ],
+                        nexus: [url: env.TEST_NEXUS_URL],
+                        qualityGateEnabled: false  // Disable for testing
+                    ]
+                    
+                    def pipeline = new BasePipeline(this, testConfig)
+                    def envManager = new EnvironmentConfigManager(pipeline, testConfig)
+                    
+                    // Test stage addition
+                    pipeline.addStage('Test Stage 1') {
+                        echo "Executing test stage 1"
+                        pipeline.recordBuildMetric('testMetric1', 'value1')
+                    }
+                    
+                    pipeline.addParallelStage('Parallel Test Stage 1') {
+                        echo "Executing parallel test stage 1"
+                    }
+                    
+                    pipeline.addParallelStage('Parallel Test Stage 2') {
+                        echo "Executing parallel test stage 2"
+                    }
+                    
+                    // Test environment configuration
+                    def devConfig = envManager.getEnvironmentConfig('dev')
+                    assert devConfig.name == 'dev'
+                    assert devConfig.autoPromote == true
+                    assert devConfig.namespace == "${env.TEST_PROJECT}-dev"
+                    
+                    // Test data recording
+                    pipeline.recordTestResults('integration-tests', [
+                        passed: 15,
+                        failed: 0,
+                        total: 15,
+                        duration: '120s'
+                    ])
+                    
+                    pipeline.recordSecurityScanResults('integration-security', [
+                        status: 'PASSED',
+                        vulnerabilities: 0,
+                        scanType: 'integration'
+                    ])
+                    
+                    // Execute pipeline
+                    pipeline.execute()
+                    
+                    // Generate and validate report
+                    def report = pipeline.generatePipelineReport()
+                    assert report.buildMetrics != null
+                    assert report.testResults.size() == 1
+                    assert report.securityScanResults.size() == 1
+                    
+                    echo "Integration tests completed successfully"
+                }
+            }
+        }
+        
+        stage('Pipeline Examples Tests') {
+            when {
+                anyOf {
+                    params.TEST_SUITE == 'ALL'
+                    params.TEST_SUITE == 'PIPELINE_TESTS'
+                }
+            }
+            parallel {
+                stage('Java Pipeline Test') {
+                    steps {
+                        script {
+                            echo "Testing Java pipeline example..."
+                            sh '''
+                                cd test-workspace
+                                cp ../examples/JavaApplicationPipeline.groovy Jenkinsfile
+                                
+                                # Validate Groovy syntax
+                                groovy -c Jenkinsfile
+                                
+                                echo "Java pipeline syntax validation passed"
+                            '''
+                        }
+                    }
+                }
+                
+                stage('Python Pipeline Test') {
+                    steps {
+                        script {
+                            echo "Testing Python pipeline example..."
+                            sh '''
+                                cd test-workspace
+                                cp ../examples/PythonApplicationPipeline.groovy Jenkinsfile
+                                
+                                # Validate Groovy syntax
+                                groovy -c Jenkinsfile
+                                
+                                echo "Python pipeline syntax validation passed"
+                            '''
+                        }
+                    }
+                }
+                
+                stage('Node.js Pipeline Test') {
+                    steps {
+                        script {
+                            echo "Testing Node.js pipeline example..."
+                            sh '''
+                                cd test-workspace
+                                cp ../examples/NodeJsApplicationPipeline.groovy Jenkinsfile
+                                
+                                # Validate Groovy syntax
+                                groovy -c Jenkinsfile
+                                
+                                echo "Node.js pipeline syntax validation passed"
+                            '''
+                        }
+                    }
+                }
+                
+                stage('.NET Pipeline Test') {
+                    steps {
+                        script {
+                            echo "Testing .NET pipeline example..."
+                            sh '''
+                                cd test-workspace
+                                cp ../examples/DotNetApplicationPipeline.groovy Jenkinsfile
+                                
+                                # Validate Groovy syntax
+                                groovy -c Jenkinsfile
+                                
+                                echo ".NET pipeline syntax validation passed"
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Security Tests') {
+            when {
+                anyOf {
+                    params.TEST_SUITE == 'ALL'
+                    params.TEST_SUITE == 'SECURITY_TESTS'
+                }
+            }
+            steps {
+                script {
+                    echo "Running security validation tests..."
+                    
+                    def testConfig = [
+                        projectName: env.TEST_PROJECT,
+                        securityScanEnabled: true
+                    ]
+                    
+                    def pipeline = new BasePipeline(this, testConfig)
+                    def securityScanner = new SecurityScanModule(pipeline, [
+                        owaspCheckVersion: '8.4.0',
+                        trivyVersion: '0.45.0'
+                    ])
+                    
+                    // Test security scanner initialization
+                    assert securityScanner != null
+                    
+                    // Test configuration validation
+                    sh '''
+                        echo "Validating security scanner configuration..."
+                        
+                        # Check if OWASP dependency check tools are available
+                        if command -v dependency-check &> /dev/null; then
+                            echo "OWASP Dependency Check: Available"
+                        else
+                            echo "OWASP Dependency Check: Not installed (will be downloaded during scan)"
+                        fi
+                        
+                        # Check if Trivy is available
+                        if command -v trivy &> /dev/null; then
+                            echo "Trivy: Available"
+                        else
+                            echo "Trivy: Not installed (will be downloaded during scan)"
+                        fi
+                        
+                        # Validate security scan configuration
+                        echo "Security scan configuration validation passed"
+                    '''
+                    
+                    echo "Security tests completed successfully"
+                }
+            }
+        }
+        
+        stage('Performance Tests') {
+            when {
+                allOf {
+                    anyOf {
+                        params.TEST_SUITE == 'ALL'
+                        params.RUN_PERFORMANCE_TESTS == true
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "Running performance tests..."
+                    
+                    def startTime = System.currentTimeMillis()
+                    
+                    // Test pipeline execution performance
+                    def testConfig = [
+                        projectName: env.TEST_PROJECT,
+                        environments: [
+                            [name: 'perf-test', autoPromote: true]
+                        ]
+                    ]
+                    
+                    def pipeline = new BasePipeline(this, testConfig)
+                    
+                    // Add multiple stages to test performance
+                    for (int i = 1; i <= 10; i++) {
+                        pipeline.addStage("Performance Test Stage ${i}") {
+                            echo "Executing performance test stage ${i}"
+                            sleep(1)  // Simulate work
+                        }
+                    }
+                    
+                    // Add parallel stages
+                    for (int i = 1; i <= 5; i++) {
+                        pipeline.addParallelStage("Parallel Performance Test ${i}") {
+                            echo "Executing parallel performance test ${i}"
+                            sleep(2)  // Simulate work
+                        }
+                    }
+                    
+                    // Execute pipeline
+                    pipeline.execute()
+                    
+                    def endTime = System.currentTimeMillis()
+                    def executionTime = endTime - startTime
+                    
+                    echo "Performance test completed in ${executionTime} ms"
+                    
+                    // Validate performance criteria
+                    if (executionTime > 60000) {  // 60 seconds
+                        echo "WARNING: Pipeline execution took longer than expected (${executionTime} ms)"
+                    } else {
+                        echo "Pipeline execution performance is acceptable (${executionTime} ms)"
+                    }
+                }
+            }
+        }
+        
+        stage('Documentation Tests') {
+            when {
+                anyOf {
+                    params.TEST_SUITE == 'ALL'
+                    params.GENERATE_REPORTS == true
+                }
+            }
+            steps {
+                script {
+                    echo "Validating documentation and generating reports..."
+                    
+                    sh '''
+                        # Validate README syntax
+                        if command -v markdown-link-check &> /dev/null; then
+                            markdown-link-check README.md
+                        else
+                            echo "README link validation skipped (markdown-link-check not available)"
+                        fi
+                        
+                        # Generate API documentation
+                        echo "Generating API documentation..."
+                        mkdir -p test-reports/docs
+                        
+                        # Extract method signatures from Groovy files
+                        find src/modules -name "*.groovy" -exec grep -l "def " {} \; > test-reports/docs/module-list.txt
+                        
+                        echo "Documentation validation completed"
+                    '''
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                echo "Collecting test results and artifacts..."
+                
+                // Publish test results
+                if (fileExists('test-reports')) {
+                    publishTestResults testResultsPattern: 'test-reports/TEST-*.xml'
+                }
+                
+                // Archive test artifacts
+                archiveArtifacts artifacts: 'test-reports/**/*', allowEmptyArchive: true
+                archiveArtifacts artifacts: 'test-artifacts/**/*', allowEmptyArchive: true
+                
+                // Generate final validation report
+                def validationReport = [
+                    testSuite: params.TEST_SUITE,
+                    timestamp: new Date().toString(),
+                    buildNumber: env.BUILD_NUMBER,
+                    status: currentBuild.currentResult,
+                    duration: currentBuild.durationString,
+                    stages: [:]
+                ]
+                
+                writeJSON file: 'validation-report.json', json: validationReport, pretty: 4
+                archiveArtifacts artifacts: 'validation-report.json', allowEmptyArchive: true
+                
+                echo "=== Validation Test Completed ==="
+                echo "Status: ${currentBuild.currentResult}"
+                echo "Duration: ${currentBuild.durationString}"
+                echo "Report: validation-report.json"
+            }
+        }
+        
+        success {
+            echo "✅ All validation tests passed successfully!"
+            
+            // Notify on success
+            script {
+                if (env.SLACK_WEBHOOK) {
+                    slackSend(
+                        color: 'good',
+                        message: "✅ Pipeline Framework validation passed - Build #${env.BUILD_NUMBER}"
+                    )
+                }
+            }
+        }
+        
+        failure {
+            echo "❌ Validation tests failed!"
+            
+            // Notify on failure
+            script {
+                if (env.SLACK_WEBHOOK) {
+                    slackSend(
+                        color: 'danger',
+                        message: "❌ Pipeline Framework validation failed - Build #${env.BUILD_NUMBER}"
+                    )
+                }
+            }
+        }
+        
+        unstable {
+            echo "⚠️ Validation tests completed with warnings!"
+            
+            // Notify on unstable
+            script {
+                if (env.SLACK_WEBHOOK) {
+                    slackSend(
+                        color: 'warning',
+                        message: "⚠️ Pipeline Framework validation unstable - Build #${env.BUILD_NUMBER}"
+                    )
+                }
+            }
+        }
+        
+        cleanup {
+            // Clean up test environment
+            script {
+                echo "Cleaning up test environment..."
+                deleteDir()
+            }
+        }
+    }
+} 

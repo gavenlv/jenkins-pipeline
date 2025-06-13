@@ -1,0 +1,27 @@
+plugins {
+    id 'groovy'
+    id 'maven-publish'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation localGroovy()
+    testImplementation 'org.spockframework:spock-core:2.0-groovy-3.0'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'PASSED', 'SKIPPED', 'FAILED'
+        exceptionFormat 'full'
+    }
+}
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '7.5'
+    distributionType = Wrapper.DistributionType.BIN
+}

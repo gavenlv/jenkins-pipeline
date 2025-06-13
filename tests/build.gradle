@@ -1,0 +1,272 @@
+plugins {
+    id 'groovy'
+    id 'java-library'
+    id 'jacoco'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+    gradlePluginPortal()
+}
+
+dependencies {
+    // Groovy and Spock for testing
+    implementation 'org.apache.groovy:groovy:4.0.13'
+    testImplementation 'org.spockframework:spock-core:2.3-groovy-4.0'
+    testImplementation 'org.spockframework:spock-junit4:2.3-groovy-4.0'
+    
+    // Jenkins pipeline testing
+    testImplementation 'com.lesfurets:jenkins-pipeline-unit:1.19'
+    
+    // Mock frameworks
+    testImplementation 'cglib:cglib-nodep:3.3.0'
+    testImplementation 'org.objenesis:objenesis:3.3'
+    
+    // JSON processing
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+    
+    // Logging
+    implementation 'ch.qos.logback:logback-classic:1.4.11'
+    
+    // Testing utilities
+    testImplementation 'org.junit.platform:junit-platform-launcher'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
+    testRuntimeOnly 'org.junit.vintage:junit-vintage-engine:5.10.0'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(11)
+    }
+}
+
+test {
+    useJUnitPlatform()
+    
+    // Test configuration
+    testLogging {
+        events "passed", "skipped", "failed", "standardOut", "standardError"
+        showExceptions true
+        exceptionFormat "full"
+        showCauses true
+        showStackTraces true
+    }
+    
+    // System properties for tests
+    systemProperties = [
+        'spock.configuration': 'tests/resources/SpockConfig.groovy',
+        'jenkins.test.harness': 'true'
+    ]
+    
+    // JVM options
+    jvmArgs = [
+        '-Xmx2g',
+        '-XX:+UnlockExperimentalVMOptions',
+        '-XX:+UseG1GC'
+    ]
+    
+    // Parallel execution
+    maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
+}
+
+// JaCoCo test coverage
+jacoco {
+    toolVersion = "0.8.8"
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+    
+    executionData.setFrom(fileTree(dir: '.', includes: ['**/*.exec']))
+}
+
+// Code coverage verification
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    violationRules {
+        rule {
+            limit {
+                minimum = 0.80  // 80% coverage minimum
+            }
+        }
+        rule {
+            element = 'CLASS'
+            excludes = [
+                '*.test.*',
+                '*.integration.*'
+            ]
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDRATIO'
+                minimum = 0.70
+            }
+        }
+    }
+}
+
+// Custom test tasks
+task unitTests(type: Test) {
+    description = 'Runs unit tests only'
+    useJUnitPlatform {
+        includeTags 'unit'
+    }
+    include '**/unit/**/*Test.groovy'
+}
+
+task integrationTests(type: Test) {
+    description = 'Runs integration tests only'
+    useJUnitPlatform {
+        includeTags 'integration'
+    }
+    include '**/integration/**/*Test.groovy'
+}
+
+task performanceTests(type: Test) {
+    description = 'Runs performance tests'
+    useJUnitPlatform {
+        includeTags 'performance'
+    }
+    include '**/performance/**/*Test.groovy'
+    
+    // Longer timeout for performance tests
+    timeout = Duration.ofMinutes(10)
+}
+
+task securityTests(type: Test) {
+    description = 'Runs security validation tests'
+    useJUnitPlatform {
+        includeTags 'security'
+    }
+    include '**/security/**/*Test.groovy'
+}
+
+// Test report aggregation
+task testReport(type: TestReport) {
+    description = 'Generates aggregated test report'
+    destinationDirectory = file("$buildDir/reports/allTests")
+    
+    // Include results from all test tasks
+    reportOn test, unitTests, integrationTests, performanceTests, securityTests
+}
+
+// Groovy compilation configuration
+compileGroovy {
+    groovyOptions.configurationScript = file('tests/resources/GroovyConfig.groovy')
+}
+
+compileTestGroovy {
+    groovyOptions.configurationScript = file('tests/resources/GroovyConfig.groovy')
+}
+
+// Source sets configuration
+sourceSets {
+    main {
+        groovy {
+            srcDirs = ['../src']
+        }
+    }
+    test {
+        groovy {
+            srcDirs = ['unit', 'integration', 'performance', 'security']
+        }
+        resources {
+            srcDirs = ['resources']
+        }
+    }
+}
+
+// Lint and code quality
+task groovyLint {
+    description = 'Runs Groovy lint checks'
+    doLast {
+        println "Running Groovy lint checks..."
+        // Add CodeNarc or other linting tools here
+    }
+}
+
+// Documentation generation
+task generateDocs {
+    description = 'Generates API documentation'
+    doLast {
+        println "Generating API documentation..."
+        def docsDir = file("$buildDir/docs")
+        docsDir.mkdirs()
+        
+        // Generate GroovyDoc
+        ant.taskdef(name: 'groovydoc', 
+                   classname: 'org.codehaus.groovy.ant.Groovydoc',
+                   classpath: configurations.compileClasspath.asPath)
+        
+        ant.groovydoc(
+            destdir: docsDir,
+            sourcepath: '../src',
+            packagenames: '**',
+            use: true,
+            windowtitle: 'Universal Jenkins Pipeline Framework API',
+            doctitle: 'Universal Jenkins Pipeline Framework API Documentation'
+        )
+    }
+}
+
+// Clean task extension
+clean {
+    delete 'test-results'
+    delete 'test-reports'
+    delete 'coverage-reports'
+}
+
+// Default task
+defaultTasks 'clean', 'test', 'jacocoTestReport'
+
+// Wrapper configuration
+wrapper {
+    gradleVersion = '8.2'
+    distributionType = Wrapper.DistributionType.ALL
+}
+
+// Task dependencies
+test.dependsOn groovyLint
+test.finalizedBy jacocoTestReport
+jacocoTestReport.finalizedBy jacocoTestCoverageVerification
+
+// Custom validation task
+task validateFramework {
+    description = 'Validates the entire pipeline framework'
+    dependsOn clean, test, jacocoTestReport, generateDocs
+    
+    doLast {
+        println "Framework validation completed successfully!"
+        println "Test results: ${test.reports.html.entryPoint}"
+        println "Coverage report: ${jacocoTestReport.reports.html.entryPoint}"
+        println "API documentation: ${file("$buildDir/docs/index.html")}"
+    }
+}
+
+// GitHub Actions / CI integration
+task ciTest {
+    description = 'Runs tests suitable for CI environment'
+    dependsOn clean, test, jacocoTestReport
+    
+    // Configure for CI
+    test {
+        systemProperty 'ci.environment', 'true'
+        maxParallelForks = 1  // Reduce parallelism in CI
+    }
+}
+
+// Development helper tasks
+task quickTest {
+    description = 'Runs quick tests for development'
+    dependsOn unitTests
+}
+
+task fullTest {
+    description = 'Runs all tests including integration and performance'
+    dependsOn test, integrationTests, performanceTests
+} 
